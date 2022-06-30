@@ -158,6 +158,7 @@ pub async fn fixtures(
                 lightning.gateway_node_pub_key,
             )
             .await;
+            bitcoin.mine_blocks(100); // cannot start at 0 due to finality subtraction
 
             (fed, user, Box::new(bitcoin), gateway, Box::new(lightning))
         }

@@ -59,7 +59,7 @@ pub const CONFIRMATION_TARGET: u16 = 24;
 
 /// The urgency of doing a peg-out is defined as the sum over all pending peg-outs of the amount of
 /// BTC blocks that have been mined since the peg-out was created. E.g. 10 transactions, each
-/// waiting for 10 blocks, would cross a minimum urgency threshold of 100.  
+/// waiting for 10 blocks, would cross a minimum urgency threshold of 100.
 pub const MIN_PEG_OUT_URGENCY: u32 = 100;
 
 pub type PartialSig = Vec<u8>;

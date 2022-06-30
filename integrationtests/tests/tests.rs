@@ -61,6 +61,51 @@ async fn peg_in_and_peg_out_with_fees() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn peg_out_to_multiple_utxos() {
+    let (fed, user, bitcoin, _, _) = fixtures(2, &[sats(100), sats(1000)]).await;
+    fed.mine_spendable_utxo(&user, &*bitcoin, Amount::from_sat(5000));
+    fed.mint_coins_for_user(&user, sats(5000)).await;
+
+    let output1 = bitcoin.get_new_address();
+    let output2 = bitcoin.get_new_address();
+    user.peg_out(1000, &output1).await;
+    user.peg_out(2000, &output2).await;
+    fed.run_consensus_epochs(1).await;
+
+    bitcoin.mine_blocks((minimint_wallet::MIN_PEG_OUT_URGENCY + 1) as u64);
+    fed.run_consensus_epochs(2).await;
+
+    fed.broadcast_transactions().await;
+    assert_eq!(bitcoin.mine_block_and_get_received(&output1), sats(1000));
+    assert_eq!(bitcoin.mine_block_and_get_received(&output2), sats(2000));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn peg_out_with_pending_change_utxo() {
+    let (fed, user, bitcoin, _, _) = fixtures(2, &[sats(100), sats(1000)]).await;
+    fed.mine_spendable_utxo(&user, &*bitcoin, Amount::from_sat(5000));
+    fed.mint_coins_for_user(&user, sats(5000)).await;
+
+    let output1 = bitcoin.get_new_address();
+    user.peg_out(1000, &output1).await;
+    fed.run_consensus_epochs(1).await;
+
+    bitcoin.mine_blocks((minimint_wallet::MIN_PEG_OUT_URGENCY + 1) as u64);
+    fed.run_consensus_epochs(2).await;
+
+    let output2 = bitcoin.get_new_address();
+    user.peg_out(2000, &output2).await;
+    fed.run_consensus_epochs(1).await;
+
+    bitcoin.mine_blocks((minimint_wallet::MIN_PEG_OUT_URGENCY + 1) as u64);
+    fed.run_consensus_epochs(2).await;
+
+    fed.broadcast_transactions().await;
+    assert_eq!(bitcoin.mine_block_and_get_received(&output1), sats(1000));
+    assert_eq!(bitcoin.mine_block_and_get_received(&output2), sats(2000));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn minted_coins_can_be_exchanged_between_users() {
     let (fed, user_send, _, _, _) = fixtures(2, &[sats(100), sats(1000)]).await;
     let user_receive = user_send.new_client(&[0]);
@@ -156,7 +201,6 @@ async fn drop_peers_who_dont_contribute_peg_out_psbts() {
     // Ensure peer 0 who received the peg out request is in the next epoch
     fed.subset_peers(&[0, 1, 2]).run_consensus_epochs(1).await;
     fed.subset_peers(&[3]).run_consensus_epochs(1).await;
-    bitcoin.mine_blocks(fed.wallet.finalty_delay as u64);
     bitcoin.mine_blocks(minimint_wallet::MIN_PEG_OUT_URGENCY as u64 + 1);
     fed.run_consensus_epochs(1).await;
 
@@ -518,7 +562,6 @@ async fn runs_consensus_if_new_block() {
     join_all(vec![
         Either::Left(async {
             tokio::time::sleep(Duration::from_millis(500)).await;
-            bitcoin.mine_blocks(fed.wallet.finalty_delay as u64);
             bitcoin.mine_blocks(minimint_wallet::MIN_PEG_OUT_URGENCY as u64 + 1);
         }),
         Either::Right(async { fed.run_consensus_epochs(2).await }),
