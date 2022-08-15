@@ -9,6 +9,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
+use minimint::net::peers::PeerConnections;
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::KeyPair;
 use bitcoin::{secp256k1, Address, Transaction};
@@ -39,7 +40,7 @@ use minimint::consensus::{ConsensusOutcome, ConsensusProposal};
 use minimint::epoch::ConsensusItem;
 use minimint::net::connect::mock::MockNetwork;
 use minimint::net::connect::{Connector, TlsTcpConnector};
-use minimint::net::peers::PeerConnector;
+use minimint::net::peers::{PeerConnector, ReconnectPeerConnections};
 use minimint::transaction::Output;
 use minimint::{consensus, MinimintServer};
 use minimint_api::config::GenerateConfig;
@@ -339,6 +340,7 @@ pub struct FederationTest {
 
 struct ServerTest {
     minimint: MinimintServer,
+    connector: Option<PeerConnector<Message<PeerId>>>,
     last_consensus: Vec<ConsensusOutcome>,
     bitcoin_rpc: Box<dyn BitcoindRpc>,
     database: Arc<dyn Database>,
@@ -347,6 +349,26 @@ struct ServerTest {
 }
 
 impl FederationTest {
+    pub async fn disconnect(&self) {
+        for server in &self.servers {
+            server.borrow().minimint.connections.abort();
+        }
+    }
+
+    pub async fn reconnect(&self) {
+        for server in &self.servers {
+            let mut s = server.borrow_mut();
+
+            if let Some(connector) = s.connector.take() {
+                let network = s.minimint.cfg.network_config().clone();
+                let connections = ReconnectPeerConnections::new(network, connector, 10)
+                    .await
+                    .to_any();
+                s.minimint.connections = connections;
+            }
+        }
+    }
+
     pub fn last_consensus(&self) -> ConsensusOutcome {
         self.last_consensus.borrow().clone()
     }
@@ -546,7 +568,7 @@ impl FederationTest {
                     .iter()
                     .map(|server| Self::consensus_epoch(server.clone(), Duration::from_millis(0))),
             );
-            if (timeout(Duration::from_secs(15), consensus).await).is_err() {
+            if (timeout(Duration::from_secs(30), consensus).await).is_err() {
                 let proposals: Vec<ConsensusProposal> = self
                     .servers
                     .iter()
@@ -631,6 +653,7 @@ impl FederationTest {
         let servers = join_all(server_config.values().map(|cfg| async move {
             let bitcoin_rpc = bitcoin_gen();
             let database = Arc::new(MemDatabase::new());
+            let connector = Some(connect_gen(cfg));
 
             let minimint = MinimintServer::new_with(
                 cfg.clone(),
@@ -647,6 +670,7 @@ impl FederationTest {
 
             Rc::new(RefCell::new(ServerTest {
                 minimint,
+                connector,
                 bitcoin_rpc,
                 database,
                 last_consensus: vec![],

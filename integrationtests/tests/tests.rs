@@ -634,3 +634,21 @@ async fn can_get_signed_epoch_history() {
         epoch1.outcome.into()
     )
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_have_a_peer_disconnect() {
+    let (fed, user, bitcoin, _, _) = fixtures(4, &[sats(100), sats(1000)]).await;
+
+    fed.subset_peers(&[3]).disconnect().await;
+    bitcoin.mine_blocks(100);
+    fed.subset_peers(&[0, 1, 2]).run_consensus_epochs(1).await;
+    bitcoin.mine_blocks(100);
+    fed.subset_peers(&[0, 1, 2]).run_consensus_epochs(1).await;
+    fed.subset_peers(&[3]).reconnect().await;
+
+    fed.subset_peers(&[3]).run_consensus_epochs(1).await;
+    tracing::warn!("OKOK");
+    fed.mine_and_mint(&user, &*bitcoin, sats(1000)).await;
+    tracing::warn!("OKOK");
+    fed.subset_peers(&[1, 2, 3]).run_consensus_epochs(1).await;
+}

@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -60,6 +61,9 @@ where
 
     /// Removes a peer connection in case of misbehavior
     async fn ban_peer(&mut self, peer: PeerId);
+
+    /// Kills all connections
+    fn abort(&self);
 
     /// Converts the struct to a `PeerConnection` trait object
     fn to_any(self) -> AnyPeerConnections<T>
@@ -151,7 +155,7 @@ where
     /// [`Connector`](crate::net::connect::Connector). See [`ReconnectPeerConnections`] for
     /// requirements on the `Connector`.
     #[instrument(skip_all)]
-    pub async fn new(cfg: NetworkConfig, connect: PeerConnector<T>) -> Self {
+    pub async fn new(cfg: NetworkConfig, connect: PeerConnector<T>, buffer_size: usize) -> Self {
         info!("Starting mint {}", cfg.identity);
 
         let shared_connector: SharedAnyConnector<PeerMessage<T>> = connect.into();
@@ -172,6 +176,7 @@ where
                             cfg.clone(),
                             shared_connector.clone(),
                             connection_receiver,
+                            buffer_size
                         ),
                     ),
                 )
@@ -270,6 +275,13 @@ where
     async fn ban_peer(&mut self, peer: PeerId) {
         self.connections.remove(&peer);
         warn!("Peer {} banned.", peer);
+    }
+
+    fn abort(&self) {
+        self._listen_task.abort();
+        for (_, connection) in self.connections.iter() {
+            connection._io_task.abort();
+        }
     }
 }
 
@@ -416,23 +428,23 @@ where
         let PeerMessage { msg, ack } = msg_res?;
         trace!(peer = ?self.peer, id = ?msg.id, "Received incoming message");
 
-        let expected = self
+        if let Some(expected) = self
             .last_received
-            .map(|last_id| last_id.increment())
-            .unwrap_or(MessageId(1));
+            .map(|last_id| last_id.increment()) {
 
-        if msg.id < expected {
-            debug!(?expected, received = ?msg.id, "Received old message");
-            return Ok(());
+            if msg.id < expected {
+                debug!(?expected, received = ?msg.id, "Received old message");
+                return Ok(());
+            }
+
+            if msg.id > expected {
+                warn!(?expected, received = ?msg.id, "Received message from the future");
+                return Err(anyhow::anyhow!("Received message from the future"));
+            }
+
+            debug_assert_eq!(expected, msg.id, "someone removed the check above");
         }
-
-        if msg.id > expected {
-            warn!(?expected, received = ?msg.id, "Received message from the future");
-            return Err(anyhow::anyhow!("Received message from the future"));
-        }
-
-        debug_assert_eq!(expected, msg.id, "someone removed the check above");
-        self.last_received = Some(expected);
+        self.last_received = Some(msg.id);
         if let Some(ack) = ack {
             self.resend_queue.ack(ack);
         }
@@ -521,9 +533,10 @@ where
         cfg: ConnectionConfig,
         connect: SharedAnyConnector<PeerMessage<M>>,
         incoming_connections: Receiver<AnyFramedTransport<PeerMessage<M>>>,
+        buffer_size: usize,
     ) -> PeerConnection<M> {
-        let (outgoing_sender, outgoing_receiver) = tokio::sync::mpsc::channel::<M>(1024);
-        let (incoming_sender, incoming_receiver) = tokio::sync::mpsc::channel::<M>(1024);
+        let (outgoing_sender, outgoing_receiver) = tokio::sync::mpsc::channel::<M>(buffer_size);
+        let (incoming_sender, incoming_receiver) = tokio::sync::mpsc::channel::<M>(buffer_size);
 
         let io_thread = tokio::spawn(Self::run_io_thread(
             incoming_sender,

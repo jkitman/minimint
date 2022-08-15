@@ -270,7 +270,7 @@ pub mod mock {
             let mut clients_lock = self.clients.lock().await;
             if let Some(client) = clients_lock.get_mut(&destination) {
                 let (mut stream_our, stream_theirs) = tokio::io::duplex(43_689);
-                client.send(stream_theirs).await.unwrap();
+                client.send(stream_theirs).await?;
                 let peer = do_handshake(self.id, &mut stream_our).await.unwrap();
                 let framed = BidiFramed::<M, WriteHalf<DuplexStream>, ReadHalf<DuplexStream>>::new(
                     stream_our,
@@ -289,9 +289,7 @@ pub mod mock {
         {
             let (send, receive) = tokio::sync::mpsc::channel(16);
 
-            if self.clients.lock().await.insert(bind_addr, send).is_some() {
-                return Err(anyhow::anyhow!("Address already bound"));
-            }
+            self.clients.lock().await.insert(bind_addr, send);
 
             let our_id = self.id;
             let stream = futures::stream::unfold(receive, move |mut receive| {

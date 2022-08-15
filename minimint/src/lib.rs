@@ -109,7 +109,7 @@ impl MinimintServer {
             transaction_notify: Arc::new(Notify::new()),
         });
 
-        let connections = ReconnectPeerConnections::new(cfg.network_config(), connector)
+        let connections = ReconnectPeerConnections::new(cfg.network_config(), connector, 10)
             .await
             .to_any();
 
@@ -175,6 +175,9 @@ impl MinimintServer {
         // process messages until new epoch or we have a proposal
         let mut outcomes: Vec<ConsensusOutcome> = loop {
             match self.await_proposal_or_peer_message().await {
+                Some(msg) if self.hbbft.next_epoch() < msg.1.epoch() => {
+                    panic!("missed epochs {}, {}",self.hbbft.next_epoch(), msg.1.epoch())
+                }
                 Some(msg) if self.hbbft.next_epoch() == msg.1.epoch() => {
                     break self.handle_message(msg).await
                 }
