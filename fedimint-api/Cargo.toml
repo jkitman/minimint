@@ -21,7 +21,7 @@ hex = "0.4.3"
 lightning-invoice = "0.18.0"
 fedimint-derive = { path = "../fedimint-derive" }
 hbbft = { git = "https://github.com/jkitman/hbbft", branch = "upgrade-threshold-crypto-libs" }
-rand = "0.6.0"
+rand = "0.8.5"
 rand07 = { version = "0.8.5", package = "rand" }
 secp256k1-zkp = { version = "0.6.0", features = [ "use-serde", "bitcoin_hashes", "global-context" ] }
 serde = { version = "1.0.145", features = [ "derive" ] }
