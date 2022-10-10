@@ -16,10 +16,9 @@ path = "src/lib.rs"
 anyhow = "1.0.65"
 async-trait = "0.1.42"
 bincode = "1.3.1"
-bitcoin = "0.28.1"
+bitcoin = "0.29.1"
 bytes = "1.1.0"
 hbbft = { git = "https://github.com/jkitman/hbbft", branch = "upgrade-threshold-crypto-libs" }
-clap = { version = "4.0.9", features = ["derive"] }
 futures = "0.3.24"
 hex = "0.4.2"
 itertools = "0.10.5"
@@ -30,19 +29,19 @@ fedimint-core = { path = "../fedimint-core" }
 fedimint-core-api = { path = "../core/api" }
 fedimint-derive = { path = "../fedimint-derive" }
 fedimint-wallet = { path = "../modules/fedimint-wallet", features = ["native"] }
-rand = "0.6.5"
+rand = "0.8"
 rayon = "1.5.0"
-rcgen = "=0.9.2"
-secp256k1-zkp = { version = "0.6.0", features = [ "global-context", "bitcoin_hashes" ] }
+rcgen = "=0.10.0"
+secp256k1-zkp = { version = "0.7.0", features = [ "global-context", "bitcoin_hashes" ] }
 serde = { version = "1.0.145", features = [ "derive" ] }
-serde_json = "1.0.85"
+serde_json = "1.0.86"
 sha3 = "0.10.5"
 tbs = { path = "../crypto/tbs" }
 thiserror = "1.0.37"
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-rustls = "0.23.4"
 tokio-util = { version = "0.7.4", features = [ "codec" ] }
-tracing ="0.1.22"
+tracing ="0.1.37"
 url = { version = "2.3.1", features = ["serde"] }
 threshold_crypto = { git = "https://github.com/jkitman/threshold_crypto", branch = "upgrade-threshold-crypto-libs" }
 
@@ -55,11 +54,10 @@ askama_axum = "0.1.0"
 axum = { version = "0.4", default-features = false }
 hyper = { version = "0.14", features = ["full"] }
 tower = { version = "0.4", features = ["util"] }
-snailquote = "0.3.1"
 qrcode-generator = "4.1.6"
 
 [dev-dependencies]
-tracing-subscriber = { version = "0.3.1", features = [ "env-filter" ] }
+tracing-subscriber = { version = "0.3.16", features = [ "env-filter" ] }
 
 [build-dependencies]
 fedimint-build = { path = "../fedimint-build" }
