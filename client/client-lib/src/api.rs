@@ -380,8 +380,7 @@ impl<C: JsonRpcClient + Debug + Send + Sync> IFederationApi for WsFederationApi<
             .request(
                 "/mint/recover",
                 id,
-                // TODO: do we need a different strategy for this?
-                TrustAllPeers,
+                UnionResponses::new(self.peers().one_honest()),
             )
             .await?;
 
