@@ -63,7 +63,7 @@ threshold_crypto = { git = "https://github.com/fedimint/threshold_crypto" }
 askama = "0.11.1"
 askama_axum = "0.2.1"
 axum = { version = "0.6.4", default-features = false, features = [ "form", "tokio" ] }
-axum-macros = "0.3.1"
+axum-macros = "0.3.5"
 http = "0.2"
 http-body = "0.4"
 hyper = { version = "0.14", features = ["full"] }
