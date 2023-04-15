@@ -36,6 +36,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
+use crate::api::FedimintApi;
 use crate::consensus::{
     ApiEvent, ConsensusProposal, FedimintConsensus, HbbftConsensusOutcome,
     HbbftSerdeConsensusOutcome,
@@ -45,6 +46,7 @@ use crate::fedimint_core::encoding::Encodable;
 use crate::fedimint_core::net::peers::IPeerConnections;
 use crate::net::api::ConsensusApi;
 use crate::net::connect::{Connector, TlsTcpConnector};
+use crate::net::connect::mock::{MockNetwork, StreamReliability};
 use crate::net::peers::{PeerConnector, PeerSlice, ReconnectPeerConnections};
 
 /// The actual implementation of the federated mint
@@ -61,6 +63,9 @@ pub mod config;
 
 /// Implementation of multiplexed peer connections
 pub mod multiplexed;
+
+/// Runs the Fedimint APIs
+pub mod api;
 
 type PeerMessage = (PeerId, EpochMessage);
 
@@ -99,7 +104,7 @@ pub struct FedimintServer {
     /// Receives event notifications from the API (triggers epochs)
     pub api_receiver: Peekable<ReceiverStream<ApiEvent>>,
     /// P2P connections for running consensus
-    pub connections: PeerConnections<EpochMessage>,
+    pub connections: ReconnectPeerConnections<EpochMessage>,
     /// Our configuration
     pub cfg: ServerConfig,
     /// Runs the HBBFT consensus algorithm
@@ -125,49 +130,49 @@ impl FedimintServer {
         db: Database,
         module_inits: ServerModuleGenRegistry,
         upgrade_epoch: Option<u64>,
-        task_group: &mut TaskGroup,
+        mut task_group: TaskGroup,
     ) -> anyhow::Result<()> {
         let our_hash = cfg
             .consensus
             .to_config_response(&module_inits)
             .consensus_hash;
 
-        let mut server = FedimintServer::new(cfg.clone(), db, module_inits, task_group).await?;
+        let mut server = FedimintServer::new(cfg.clone(), db, module_inits, &mut task_group).await?;
 
         if let Some(epoch) = upgrade_epoch {
             server.consensus.remove_upgrade_items(epoch).await?;
         }
 
-        server.spawn_api().await;
+        // server.spawn_api().await;
 
-        loop {
-            info!(
-                target: LOG_CONSENSUS,
-                "Waiting for peers to agree on a consensus config hash"
-            );
-            match server.api.consensus_config_hash().await {
-                Ok(consensus_hash) if consensus_hash == our_hash => break,
-                Ok(_) => bail!("Our consensus config doesn't match peers!"),
-                Err(e) => {
-                    warn!(target: LOG_CONSENSUS, "ERROR {:?}", e)
-                }
-            }
-            sleep(Duration::from_millis(1000)).await;
-        }
+        // loop {
+        //     info!(
+        //         target: LOG_CONSENSUS,
+        //         "Waiting for peers to agree on a consensus config hash"
+        //     );
+        //     match server.api.consensus_config_hash().await {
+        //         Ok(consensus_hash) if consensus_hash == our_hash => break,
+        //         Ok(_) => bail!("Our consensus config doesn't match peers!"),
+        //         Err(e) => {
+        //             warn!(target: LOG_CONSENSUS, "ERROR {:?}", e)
+        //         }
+        //     }
+        //     sleep(Duration::from_millis(1000)).await;
+        // }
 
-        task_group
-            .spawn_local("consensus", move |handle| server.run_consensus(handle))
-            .await;
+        // task_group
+        //     .spawn_local("consensus", move |handle| server.run_consensus(handle))
+        //     .await;
+        server.run_consensus(task_group.make_handle()).await;
         Ok(())
     }
 
     /// Starts the API listening in a new thread
     pub async fn spawn_api(&mut self) {
-        let api = Arc::new(self.consensus.api.clone());
-        let cfg = self.cfg.clone();
+        let api = self.consensus.api.clone();
         self.task_group
-            .spawn("api-server", |handle| {
-                net::api::run_server(cfg, api, handle)
+            .spawn("api-server", move |handle| {
+                FedimintApi::run_consensus_api(api)
             })
             .await;
     }
@@ -260,8 +265,7 @@ impl FedimintServer {
             connector,
             task_group,
         )
-        .await
-        .into_dyn();
+        .await;
 
         let net_info = NetworkInfo::new(
             cfg.local.identity,
@@ -383,7 +387,7 @@ impl FedimintServer {
         let epoch = self.next_epoch_to_process();
         info!(
             target: LOG_CONSENSUS,
-            "Starting consensus at epoch {}", epoch
+            "Peer {} starting consensus at epoch {}", self.cfg.local.identity, epoch
         );
         self.hbbft.skip_to_epoch(epoch);
         self.rejoin_at_epoch = Some(HashMap::new());
@@ -502,6 +506,7 @@ impl FedimintServer {
                 contributions: BTreeMap::from([(self.cfg.local.identity, proposal.items)]),
             }]);
         }
+        warn!("CONNECTIONS OUTCOMES1 {:?}", self.connections.connections.values().map(|v| v.outgoing.is_closed()).collect::<Vec<_>>());
 
         // process messages until new epoch or we have a proposal
         let mut outcomes: Vec<HbbftConsensusOutcome> = loop {
@@ -513,6 +518,8 @@ impl FedimintServer {
                 _ => break vec![],
             };
         };
+        warn!("CONNECTIONS OUTCOMES2 {:?}", self.connections.connections.values().map(|v| v.outgoing.is_closed()).collect::<Vec<_>>());
+
         let proposal = self.process_events_then_propose(override_proposal).await;
 
         for peer in proposal.drop_peers.iter() {
@@ -587,13 +594,18 @@ impl FedimintServer {
     async fn await_next_epoch(&mut self) -> anyhow::Result<EpochTriggerEvent> {
         if self.run_empty_epochs > 0 {
             self.run_empty_epochs = self.run_empty_epochs.saturating_sub(1);
+            warn!("CONNECTIONS RunEpochRequest {:?}", self.connections.connections.values().map(|v| v.outgoing.is_closed()).collect::<Vec<_>>());
+
             return Ok(EpochTriggerEvent::RunEpochRequest);
         }
 
         tokio::select! {
             _peek = Pin::new(&mut self.api_receiver).peek() => Ok(EpochTriggerEvent::ApiEvent),
             () = self.consensus.await_consensus_proposal() => Ok(EpochTriggerEvent::ModuleProposalEvent),
-            msg = self.connections.receive() => Ok(EpochTriggerEvent::NewMessage(msg?))
+            msg = self.connections.receive() => {
+        warn!("CONNECTIONS receive {:?}", self.connections.connections.values().map(|v| v.outgoing.is_closed()).collect::<Vec<_>>());
+
+                Ok(EpochTriggerEvent::NewMessage(msg?)) }
         }
     }
 
@@ -656,6 +668,7 @@ impl FedimintServer {
     /// Sends a rejoin request to all peers, indicating the number of epochs we
     /// want them to create
     async fn request_rejoin(&mut self, epochs_to_run: u64) {
+        warn!("request_rejoin {:?}", self.connections.connections.values().map(|v| v.outgoing.is_closed()).collect::<Vec<_>>());
         self.connections
             .send(
                 &Target::all().peers(&self.other_peers),
@@ -663,6 +676,8 @@ impl FedimintServer {
             )
             .await
             .expect("Failed to send rejoin requests");
+        warn!("request_rejoin SENT {:?}", self.connections.connections.values().map(|v| v.outgoing.is_closed()).collect::<Vec<_>>());
+
     }
 }
 

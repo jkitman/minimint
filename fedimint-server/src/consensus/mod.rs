@@ -488,7 +488,9 @@ impl FedimintConsensus {
             })
             .collect::<Vec<_>>();
 
-        select_all(proposal_futures).await;
+        if proposal_futures.len() > 0 {
+            select_all(proposal_futures).await;
+        }
     }
 
     pub async fn get_consensus_proposal(&self) -> ConsensusProposal {

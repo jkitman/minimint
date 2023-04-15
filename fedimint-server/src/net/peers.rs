@@ -21,7 +21,7 @@ use fedimint_logging::LOG_NET_PEER;
 use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use hbbft::Target;
-use rand::{thread_rng, Rng};
+use rand::{thread_rng, Rng, random};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -48,12 +48,13 @@ pub type PeerConnector<M> = AnyConnector<PeerMessage<M>>;
 /// production deployments the `Connector` has to ensure that connections are
 /// authenticated and encrypted.
 pub struct ReconnectPeerConnections<T> {
-    connections: HashMap<PeerId, PeerConnection<T>>,
+    pub connections: HashMap<PeerId, PeerConnection<T>>,
 }
 
-struct PeerConnection<T> {
-    outgoing: Sender<T>,
-    incoming: Receiver<T>,
+#[derive(Debug)]
+pub struct PeerConnection<T> {
+    pub outgoing: Sender<T>,
+    pub incoming: Receiver<T>,
 }
 
 /// Specifies the network configuration for federation-internal communication
@@ -157,6 +158,7 @@ where
         task_group: &mut TaskGroup,
     ) -> Self {
         let shared_connector: SharedAnyConnector<PeerMessage<T>> = connect.into();
+        let task_group = &mut TaskGroup::new();
 
         let (connection_senders, connections) = cfg
             .peers
@@ -164,7 +166,7 @@ where
             .filter(|(&peer, _)| peer != cfg.identity)
             .map(|(&peer, peer_address)| {
                 let (connection_sender, connection_receiver) =
-                    tokio::sync::mpsc::channel::<AnyFramedTransport<PeerMessage<T>>>(4);
+                    tokio::sync::mpsc::channel::<AnyFramedTransport<PeerMessage<T>>>(40);
                 (
                     (peer, connection_sender),
                     (
@@ -233,6 +235,7 @@ where
                 );
             }
         }
+        warn!("LISTENER SHUTDOWN");
     }
 }
 
@@ -259,11 +262,11 @@ where
     #[must_use]
     async fn send(&mut self, peers: &[PeerId], msg: T) -> Cancellable<()> {
         for peer_id in peers {
-            trace!(target: LOG_NET_PEER, ?peer_id, "Sending message to");
+            debug!(target: LOG_NET_PEER, ?peer_id, "Sending message to");
             if let Some(peer) = self.connections.get_mut(peer_id) {
                 peer.send(msg.clone()).await?;
             } else {
-                trace!(target: LOG_NET_PEER,peer = ?peer_id, "Not sending message to unknown peer (maybe banned)");
+                debug!(target: LOG_NET_PEER,peer = ?peer_id, "Not sending message to unknown peer (maybe banned)");
             }
         }
         Ok(())
@@ -353,7 +356,7 @@ where
                         self.send_message_connected(connected, msg).await
                     },
                     None => {
-                        debug!(target: LOG_NET_PEER, "Exiting peer connection IO task - parent disconnected");
+                        debug!(target: LOG_NET_PEER, "Exiting peer connection IO task - parent disconnected1");
                         return None;
                     },
                 }
@@ -367,7 +370,7 @@ where
                     None => {
                         debug!(
                         target: LOG_NET_PEER,
-                            "Exiting peer connection IO task - parent disconnected");
+                            "Exiting peer connection IO task - parent disconnected2");
                         return None;
                     },
                 }
@@ -416,6 +419,7 @@ where
 
     fn disconnect(&self, mut disconnect_count: u64) -> PeerConnectionState<M> {
         disconnect_count += 1;
+        warn!("ADDRESS {:?}", self.peer_address);
 
         let reconnect_at = {
             let delay = self.delay_calculator.reconnection_delay(disconnect_count);
@@ -448,7 +452,7 @@ where
         msg: M,
     ) -> PeerConnectionState<M> {
         let umsg = self.resend_queue.push(msg);
-        trace!(target: LOG_NET_PEER, peer = ?self.peer, id = ?umsg.id, "Sending outgoing message");
+        debug!(target: LOG_NET_PEER, peer = ?self.peer, id = ?umsg.id, "Sending outgoing message");
 
         match connected
             .connection
@@ -482,7 +486,7 @@ where
         msg_res: Result<PeerMessage<M>, anyhow::Error>,
     ) -> Result<(), anyhow::Error> {
         let PeerMessage { msg, ack } = msg_res?;
-        trace!(target: LOG_NET_PEER,peer = ?self.peer, id = ?msg.id, "Received incoming message");
+        debug!(target: LOG_NET_PEER,peer = ?self.peer, id = ?msg.id, "Received incoming message");
 
         let expected = self
             .last_received
@@ -529,7 +533,7 @@ where
                     Some(msg) => {
                         self.send_message(disconnected, msg).await}
                     None => {
-                        debug!(target: LOG_NET_PEER,"Exiting peer connection IO task - parent disconnected");
+                        debug!(target: LOG_NET_PEER,"Exiting peer connection IO task - parent disconnected3 {:?}", self.outgoing.try_recv());
                         return None;
                     }
                 }
@@ -540,7 +544,7 @@ where
                         self.receive_connection(disconnected, new_connection).await
                     },
                     None => {
-                        debug!(target: LOG_NET_PEER, "Exiting peer connection IO task - parent disconnected");
+                        debug!(target: LOG_NET_PEER, "Exiting peer connection IO task - parent disconnected4");
                         return None;
                     },
                 }
