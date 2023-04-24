@@ -1,0 +1,19 @@
+[package]
+name = "fedimint-consensus"
+version = "0.1.0"
+authors = ["The Fedimint Developers"]
+edition = "2021"
+description = "Library for the BFT consensus algorithm"
+license = "MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "fedimint_consensus"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1.64"
+fedimint-core = { path = "../fedimint-core" }
+aleph-bft = "0.20.5"
+futures = "0.3.24"
+bitcoin_hashes = "0.12.0"
