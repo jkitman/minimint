@@ -1,64 +1,95 @@
 use fedimint_core::db::DatabaseTransaction;
 use fedimint_core::encoding::{Decodable, Encodable};
-use fedimint_core::{impl_db_lookup, impl_db_record};
+use fedimint_core::{impl_db_lookup, impl_db_record, Amount, OutPoint};
 use futures::StreamExt;
 use serde::Serialize;
 use strum_macros::EnumIter;
 
-/// Example function that will migrate the Dummy Module's database from
-/// version 0 to version 1. This function selects all of the ExampleKeyV0
-/// and inserts a new String to construct ExampleKeys, deletes the old
-/// ExampleKeyV0, then inserts the new ExampleKeys.
-pub async fn migrate_dummy_db_version_0<'a, 'b>(
-    dbtx: &'b mut DatabaseTransaction<'a>,
-) -> Result<(), anyhow::Error> {
-    let example_keys_v0 = dbtx
-        .find_by_prefix(&ExampleKeyPrefixV0)
-        .await
-        .collect::<Vec<_>>()
-        .await;
-    dbtx.remove_by_prefix(&ExampleKeyPrefixV0).await;
-    for (key, val) in example_keys_v0 {
-        let key_v2 = ExampleKey(key.0, "Example String".to_string());
-        dbtx.insert_new_entry(&key_v2, &val).await;
-    }
-    Ok(())
-}
 
+
+/// Namespaces DB keys for this module
 #[repr(u8)]
 #[derive(Clone, EnumIter, Debug)]
 pub enum DbKeyPrefix {
-    Example = 0x80,
+    DummyFunds = 0x01,
+    DummyOutputs = 0x02,
 }
 
+// TODO: Boilerplate-code
 impl std::fmt::Display for DbKeyPrefix {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{self:?}")
     }
 }
 
+/// Key to lookup data
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
-pub struct ExampleKeyV0(pub u64);
+pub struct DummyFundsKeyV0(pub String);
 
+/// Prefix to find all keys
 #[derive(Debug, Encodable, Decodable)]
-pub struct ExampleKeyPrefixV0;
+pub struct DummyFundsKeyPrefixV0;
 
+// Turns types into DB record
 impl_db_record!(
-    key = ExampleKeyV0,
+    key = DummyFundsKeyV0,
+    value = Amount,
+    db_prefix = DbKeyPrefix::DummyFunds,
+);
+// Associates prefix type
+impl_db_lookup!(key = DummyFundsKeyV0, query_prefix = DummyFundsKeyPrefixV0);
+
+/// Example DB migration from version 0 to version 1
+pub async fn migrate_to_v1(dbtx: &mut DatabaseTransaction<'_>) -> Result<(), anyhow::Error> {
+    // Select old entries
+    let v0_entries = dbtx
+        .find_by_prefix(&DummyFundsKeyPrefixV0)
+        .await
+        .collect::<Vec<(DummyFundsKeyV0, Amount)>>()
+        .await;
+
+    // Remove old entries
+    dbtx.remove_by_prefix(&DummyFundsKeyPrefixV0).await;
+
+    // Migrate to new entries
+    for (v0_key, v0_val) in v0_entries {
+        let v1_key = DummyFundsKeyV1(v0_key.0);
+        dbtx.insert_new_entry(&v1_key, &v0_val).await;
+    }
+    Ok(())
+}
+
+/// Key to lookup outputs
+#[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
+pub struct DummyOutputKeyV1(pub OutPoint);
+
+/// Prefix to find all outputs
+#[derive(Debug, Encodable, Decodable)]
+pub struct DummyOutputKeyV1Prefix;
+
+// Turns types into DB record
+impl_db_record!(
+    key = DummyOutputKeyV1,
     value = (),
-    db_prefix = DbKeyPrefix::Example,
+    db_prefix = DbKeyPrefix::DummyOutputs,
+);
+impl_db_lookup!(
+    key = DummyOutputKeyV1,
+    query_prefix = DummyOutputKeyV1Prefix
 );
 
-impl_db_lookup!(key = ExampleKeyV0, query_prefix = ExampleKeyPrefixV0);
+/// Key to lookup funds for a user
 #[derive(Debug, Clone, Encodable, Decodable, Eq, PartialEq, Hash, Serialize)]
-pub struct ExampleKey(pub u64, pub String);
+pub struct DummyFundsKeyV1(pub String);
 
+/// Prefix to find all funds
 #[derive(Debug, Encodable, Decodable)]
-pub struct ExampleKeyPrefix;
+pub struct DummyFundsKeyV1Prefix;
 
+// Turns types into DB record
 impl_db_record!(
-    key = ExampleKey,
-    value = (),
-    db_prefix = DbKeyPrefix::Example,
+    key = DummyFundsKeyV1,
+    value = Amount,
+    db_prefix = DbKeyPrefix::DummyFunds,
 );
-impl_db_lookup!(key = ExampleKey, query_prefix = ExampleKeyPrefix);
+impl_db_lookup!(key = DummyFundsKeyV1, query_prefix = DummyFundsKeyV1Prefix);
