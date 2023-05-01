@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use fedimint_core::util::BoxFuture;
@@ -18,7 +19,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::core::ModuleInstanceId;
 use crate::encoding::{Decodable, Encodable};
 use crate::fmt_utils::AbbreviateHexBytes;
-use crate::task::{MaybeSend, MaybeSync};
+use crate::task::{sleep, MaybeSend, MaybeSync};
 use crate::{async_trait_maybe_send, maybe_add_send};
 
 pub mod mem_impl;
@@ -285,7 +286,7 @@ impl Database {
         };
         loop {
             // register for notification
-            let notify = self.inner_db.notifications.register(&key_bytes);
+            let _notify = self.inner_db.notifications.register(&key_bytes);
 
             // check for value in db
             let mut tx = self.inner_db.db.begin_transaction().await;
@@ -315,7 +316,7 @@ impl Database {
                 );
             } else {
                 // key not found, try again
-                notify.await;
+                sleep(Duration::from_millis(100)).await
                 // if miss a notification between await and next register, it is
                 // fine. because we are going check the database
             }

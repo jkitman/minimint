@@ -12,8 +12,9 @@ use bitcoin_hashes::sha256::{Hash as Sha256, HashEngine};
 use bitcoin_hashes::{hex, sha256};
 use fedimint_core::cancellable::Cancelled;
 use fedimint_core::core::{
-    ModuleInstanceId, ModuleKind, LEGACY_HARDCODED_INSTANCE_ID_LN,
-    LEGACY_HARDCODED_INSTANCE_ID_MINT, LEGACY_HARDCODED_INSTANCE_ID_WALLET,
+    ModuleInstanceId, ModuleKind, LEGACY_HARDCODED_INSTANCE_ID_DUMMY,
+    LEGACY_HARDCODED_INSTANCE_ID_LN, LEGACY_HARDCODED_INSTANCE_ID_MINT,
+    LEGACY_HARDCODED_INSTANCE_ID_WALLET,
 };
 use fedimint_core::encoding::Encodable;
 use fedimint_core::{BitcoinHash, ModuleDecoderRegistry};
@@ -494,6 +495,13 @@ impl<M> Iterator for LegacyInitOrderIter<M> {
             }
             LEGACY_HARDCODED_INSTANCE_ID_WALLET => {
                 let kind = ModuleKind::from_static_str("wallet");
+                Some((
+                    kind.clone(),
+                    self.rest.remove(&kind).expect("checked in constructor"),
+                ))
+            }
+            LEGACY_HARDCODED_INSTANCE_ID_DUMMY => {
+                let kind = ModuleKind::from_static_str("dummy");
                 Some((
                     kind.clone(),
                     self.rest.remove(&kind).expect("checked in constructor"),
