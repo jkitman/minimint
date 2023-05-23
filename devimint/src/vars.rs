@@ -63,6 +63,13 @@ impl<T: ToEnvVar> ToEnvVar for Option<T> {
         self.as_ref().and_then(ToEnvVar::to_env_value)
     }
 }
+
+impl ToEnvVar for ConfigGenParams {
+    fn to_env_value(&self) -> Option<String> {
+        serde_json::to_string(&self).ok()
+    }
+}
+
 async fn mkdir(dir: PathBuf) -> anyhow::Result<PathBuf> {
     if !dir.exists() {
         tokio::fs::create_dir(&dir).await?;
@@ -70,8 +77,10 @@ async fn mkdir(dir: PathBuf) -> anyhow::Result<PathBuf> {
     Ok(dir)
 }
 
+use fedimint_server::config::ConfigGenParams;
 use format as f;
 use tokio::fs;
+
 pub fn utf8(path: &Path) -> &str {
     path.as_os_str().to_str().expect("must be valid utf8")
 }
@@ -144,21 +153,19 @@ impl Global {
     }
 }
 
-const BASE_PORT: usize = 8173 + 10000;
-
 // We allow ranges of 10 ports for each fedimintd / dkg instance starting from
 // 18173. Each port needed is incremented by 1 within this range.
 //
 // * `id` - ID of the server. Used to calculate port numbers.
 declare_vars! {
-    Fedimintd = (globals: &Global, id: usize, password: bool) => {
-        FM_BIND_P2P: String = format!("127.0.0.1:{p2p}", p2p = BASE_PORT + id * 10);
-        FM_P2P_URL: String = format!("fedimint://{FM_BIND_P2P}");
-        FM_BIND_API: String = format!("127.0.0.1:{api}", api = BASE_PORT + id * 10 + 1);
-        FM_API_URL: String = format!("ws://{FM_BIND_API}");
-        FM_DATA_DIR: PathBuf = mkdir(globals.FM_DATA_DIR.join(format!("server-{id}"))).await?;
-        FM_PASSWORD: Option<String> = if password {
-            Some(format!("pass{id}"))
+    Fedimintd = (globals: &Global, params: &ConfigGenParams, skip_ui: bool) => {
+        FM_BIND_P2P: String = params.local.p2p_bind.to_string();
+        FM_P2P_URL: String = params.consensus.peers[&params.local.our_id].p2p_url.to_string();
+        FM_BIND_API: String = params.local.api_bind.to_string();
+        FM_API_URL: String = params.consensus.peers[&params.local.our_id].api_url.to_string();
+        FM_DATA_DIR: PathBuf = mkdir(globals.FM_DATA_DIR.join(format!("server-{}", params.local.our_id.to_usize()))).await?;
+        FM_CONFIG_GEN_PARAMS: Option<ConfigGenParams> = if skip_ui {
+            Some(params.clone())
         } else {
             None
         };

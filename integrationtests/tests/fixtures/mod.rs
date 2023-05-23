@@ -1288,6 +1288,7 @@ impl FederationTest {
 
             let _api = FedimintServer {
                 data_dir: Default::default(),
+                config_gen_params: None,
                 settings: ConfigGenSettings {
                     download_token_limit: cfg.local.download_token_limit,
                     p2p_bind: cfg.local.fed_bind,

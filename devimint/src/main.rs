@@ -9,7 +9,7 @@ use bitcoincore_rpc::bitcoin::Amount as BitcoinRpcAmount;
 use bitcoincore_rpc::RpcApi;
 use clap::{Parser, Subcommand};
 use cln_rpc::primitives::{Amount as ClnRpcAmount, AmountOrAny};
-use devimint::federation::Fedimintd;
+use devimint::federation::{Fedimintd, BASE_PORT};
 use devimint::util::{poll, ProcessManager};
 use devimint::{
     cmd, dev_fed, external_daemons, vars, Bitcoind, DevFed, LightningNode, Lightningd, Lnd,
@@ -179,14 +179,12 @@ async fn cli_tests(dev_fed: DevFed) -> Result<()> {
     // Test load last epoch with admin client
     info!("Testing load last epoch with admin client");
     let epoch_json = cmd!(fed, "last-epoch")
-        .env("FM_SALT_PATH", format!("{data_dir}/server-0/private.salt"))
         .env("FM_PASSWORD", "pass0")
         .env("FM_OUR_ID", "0")
         .out_json()
         .await?;
     let epoch_hex = epoch_json["hex_outcome"].as_str().unwrap();
     let _force_epoch = cmd!(fed, "force-epoch", epoch_hex)
-        .env("FM_SALT_PATH", format!("{data_dir}/server-0/private.salt"))
         .env("FM_PASSWORD", "pass0")
         .env("FM_OUR_ID", "0")
         .out_json()
@@ -1057,13 +1055,16 @@ async fn write_ready_file<T>(global: &vars::Global, result: Result<T>) -> Result
 async fn run_ui(process_mgr: &ProcessManager, task_group: &TaskGroup) -> Result<()> {
     let bitcoind = Bitcoind::new(process_mgr).await?;
     let fed_size = process_mgr.globals.FM_FED_SIZE;
+    let peers: Vec<PeerId> = (0..fed_size).map(|id| PeerId::from(id as u16)).collect();
+    let params = local_config_gen_params(&peers, BASE_PORT, Default::default())?;
     // don't drop fedimintds
-    let _fedimintds = futures::future::try_join_all((0..fed_size).map(|peer_id| {
+    let _fedimintds = futures::future::try_join_all(peers.iter().map(|peer| {
         let bitcoind = bitcoind.clone();
+        let params = params.clone();
         async move {
-            let env_vars = vars::Fedimintd::init(&process_mgr.globals, peer_id, false).await?;
-            let fm = Fedimintd::new(process_mgr, bitcoind.clone(), peer_id, &env_vars).await?;
-            let server_addr = &env_vars.FM_BIND_API;
+            let vars = vars::Fedimintd::init(&process_mgr.globals, &params[peer], false).await?;
+            let fm = Fedimintd::new(process_mgr, bitcoind.clone(), peer.to_usize(), &vars).await?;
+            let server_addr = &vars.FM_BIND_API;
 
             poll("waiting for ui/api startup", || async {
                 Ok(TcpStream::connect(server_addr).await.is_ok())
@@ -1080,6 +1081,9 @@ async fn run_ui(process_mgr: &ProcessManager, task_group: &TaskGroup) -> Result<
 }
 
 use std::fmt::Write;
+
+use fedimint_core::PeerId;
+use fedimint_testing::federation::local_config_gen_params;
 
 async fn setup(arg: CommonArgs) -> Result<(ProcessManager, TaskGroup)> {
     let globals = vars::Global::new(&arg.test_dir, arg.fed_size).await?;

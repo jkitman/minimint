@@ -10,13 +10,13 @@ use fedimint_core::config::{ServerModuleGenParamsRegistry, ServerModuleGenRegist
 use fedimint_core::db::Database;
 use fedimint_core::module::ServerModuleGen;
 use fedimint_core::task::{sleep, TaskGroup};
-use fedimint_core::util::write_overwrite;
 use fedimint_core::{timing, Amount};
 use fedimint_ln_server::LightningGen;
 use fedimint_logging::TracingSetup;
 use fedimint_mint_server::MintGen;
 use fedimint_server::config::api::ConfigGenSettings;
-use fedimint_server::config::io::{CODE_VERSION, DB_FILE, PLAINTEXT_PASSWORD};
+use fedimint_server::config::io::{CODE_VERSION, DB_FILE};
+use fedimint_server::config::ConfigGenParams;
 use fedimint_server::FedimintServer;
 use fedimint_wallet_server::WalletGen;
 use futures::FutureExt;
@@ -34,11 +34,9 @@ pub struct ServerOpts {
     /// Path to folder containing federation config files
     #[arg(long = "data-dir", env = "FM_DATA_DIR")]
     pub data_dir: PathBuf,
-    /// Password to encrypt sensitive config files
-    // TODO: should probably never send password to the server directly, rather send the hash via
-    // the API
-    #[arg(long, env = "FM_PASSWORD")]
-    pub password: Option<String>,
+    /// Config gen params to run DKG immediately
+    #[arg(long, env = "FM_CONFIG_GEN_PARAMS")]
+    pub config_gen_params: Option<ConfigGenParams>,
     /// Enable tokio console logging
     #[arg(long, env = "FM_TOKIO_CONSOLE_BIND")]
     pub tokio_console_bind: Option<SocketAddr>,
@@ -234,18 +232,20 @@ async fn run(
         decoders.clone(),
     );
 
-    // TODO: Fedimintd should use the config gen API
-    // on each run we want to pass the currently passed passsword, so we need to
-    // overwrite
-    if let Some(password) = opts.password {
-        write_overwrite(opts.data_dir.join(PLAINTEXT_PASSWORD), password)?;
-    };
+    // Use default params
+    // TODO: devimint should probably build Fedimintd itself
+    let mut config_gen_params = opts.config_gen_params.clone();
+    if let Some(config_gen_params) = &mut config_gen_params {
+        config_gen_params.consensus.modules = module_gens_params.clone();
+    }
+
     let default_params = ConfigGenParamsRequest {
         meta: BTreeMap::new(),
         modules: module_gens_params,
     };
     let mut api = FedimintServer {
         data_dir: opts.data_dir,
+        config_gen_params,
         settings: ConfigGenSettings {
             download_token_limit: None,
             p2p_bind: opts.bind_p2p,

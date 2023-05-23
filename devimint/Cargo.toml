@@ -23,6 +23,8 @@ fedimint-ln-client = { path = "../modules/fedimint-ln-client" }
 fedimint-logging = { path = "../fedimint-logging" }
 fedimint-wallet-client = { path = "../modules/fedimint-wallet-client" }
 fedimint-client-legacy = { path = "../fedimint-client-legacy" }
+fedimint-testing = { path = "../fedimint-testing" }
+fedimint-server = { path = "../fedimint-server" }
 futures = "0.3.24"
 nix = { version = "0.26.2", features = ["signal"] }
 rand = "0.8.5"

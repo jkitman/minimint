@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use bitcoincore_rpc::RpcApi;
-use federation::{run_dkg, Federation};
+use federation::Federation;
 use fedimint_client::module::gen::{ClientModuleGenRegistry, DynClientModuleGen};
 use fedimint_client_legacy::modules::mint::MintClientGen;
 use fedimint_client_legacy::{module_decode_stubs, UserClient, UserClientConfig};
@@ -29,6 +29,7 @@ pub use external::{
     external_daemons, open_channel, Bitcoind, Electrs, Esplora, ExternalDaemons, LightningNode,
     Lightningd, Lnd,
 };
+use fedimint_core::task::sleep;
 
 pub mod federation;
 
@@ -169,8 +170,11 @@ pub struct Faucet {
 
 impl Faucet {
     pub async fn new(process_mgr: &ProcessManager) -> Result<Self> {
-        let connect_string =
-            fs::read_to_string(process_mgr.globals.FM_DATA_DIR.join("client-connect")).await?;
+        let client_file = process_mgr.globals.FM_DATA_DIR.join("client-connect");
+        while !client_file.exists() {
+            sleep(Duration::from_millis(100)).await;
+        }
+        let connect_string = fs::read_to_string(client_file).await?;
 
         Ok(Self {
             _process: process_mgr
@@ -205,8 +209,6 @@ pub async fn dev_fed(process_mgr: &ProcessManager) -> Result<DevFed> {
         Esplora::new(process_mgr, bitcoind.clone()),
         async {
             let fed_size = process_mgr.globals.FM_FED_SIZE;
-            run_dkg(process_mgr, fed_size).await?;
-            info!(LOG_DEVIMINT, "dkg done");
             tokio::try_join!(
                 Federation::new(process_mgr, bitcoind.clone(), 0..fed_size),
                 Faucet::new(process_mgr)

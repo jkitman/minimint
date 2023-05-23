@@ -29,11 +29,12 @@ use tokio::runtime::Runtime;
 use tracing::{error, info};
 
 use crate::config::api::{ConfigGenApi, ConfigGenSettings};
+use crate::config::ConfigGenParams;
 use crate::consensus::server::ConsensusServer;
 use crate::consensus::HbbftConsensusOutcome;
 use crate::net::api::RpcHandlerCtx;
 use crate::net::connect::TlsTcpConnector;
-use crate::net::peers::ReconnectPeerConnections;
+use crate::net::peers::{DelayCalculator, ReconnectPeerConnections};
 
 /// The actual implementation of consensus
 pub mod consensus;
@@ -70,6 +71,8 @@ pub trait HasApiContext<State> {
 pub struct FedimintServer {
     /// Location where configs are stored
     pub data_dir: PathBuf,
+    /// Config gen params to run DKG immediately
+    pub config_gen_params: Option<ConfigGenParams>,
     /// Module and endpoint settings necessary for starting the API
     pub settings: ConfigGenSettings,
     /// Database shared by the API and consensus
@@ -119,6 +122,23 @@ impl FedimintServer {
             config_generated_tx,
             &mut task_group,
         );
+
+        // Run DKG immediately if params already exist
+        if let Some(params) = &self.config_gen_params {
+            let mut task_group = TaskGroup::new();
+            let config = ServerConfig::distributed_gen(
+                params,
+                self.settings.registry.clone(),
+                DelayCalculator::PROD_DEFAULT,
+                &mut task_group,
+            )
+            .await?;
+            task_group.shutdown().await;
+            config_gen
+                .write_configs(&config, &self.settings.registry)
+                .map_err(|e| format_err!("DKG failed {e:?}"))?;
+            return Ok(config);
+        }
 
         // Attempt get the config with local password, otherwise start config gen
         if let Ok(password) = fs::read_to_string(self.data_dir.join(PLAINTEXT_PASSWORD)) {

@@ -25,13 +25,14 @@ use fedimint_core::task::TaskGroup;
 use fedimint_core::util::write_new;
 use fedimint_core::PeerId;
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 use tokio_rustls::rustls;
 use tracing::error;
 use url::Url;
 
 use crate::config::io::{read_server_config, write_server_config, PLAINTEXT_PASSWORD, SALT_FILE};
-use crate::config::{gen_cert_and_key, ConfigGenParams, ServerConfig};
+use crate::config::{gen_cert_and_key, serde_tls_key, ConfigGenParams, ServerConfig};
 use crate::db::ConsensusUpgradeKey;
 use crate::net::peers::DelayCalculator;
 use crate::HasApiContext;
@@ -216,7 +217,7 @@ impl ConfigGenApi {
             let mut state = self.state.lock().expect("lock poisoned");
             match config {
                 Ok(config) => {
-                    self.write_configs(&config, &state)?;
+                    self.write_configs(&config, &state.settings.registry)?;
                     state.status = ServerStatus::VerifyingConfigs;
                     state.config = Some(config);
                 }
@@ -245,19 +246,18 @@ impl ConfigGenApi {
     }
 
     /// Writes the configs to disk after they are generated
-    fn write_configs(&self, config: &ServerConfig, state: &ConfigGenState) -> ApiResult<()> {
+    pub fn write_configs(
+        &self,
+        config: &ServerConfig,
+        registry: &ServerModuleGenRegistry,
+    ) -> ApiResult<()> {
         let auth = config.private.api_auth.0.clone();
         let io_error = |e| ApiError::server_error(format!("Unable to write to data dir {e:?}"));
         // TODO: Make writing password optional
         write_new(self.data_dir.join(PLAINTEXT_PASSWORD), &auth).map_err(io_error)?;
         write_new(self.data_dir.join(SALT_FILE), random_salt()).map_err(io_error)?;
-        write_server_config(
-            config,
-            self.data_dir.clone(),
-            &auth,
-            &state.settings.registry,
-        )
-        .map_err(|e| ApiError::server_error(format!("Unable to encrypt configs {e:?}")))
+        write_server_config(config, self.data_dir.clone(), &auth, registry)
+            .map_err(|e| ApiError::server_error(format!("Unable to encrypt configs {e:?}")))
     }
 
     /// Attempts to decrypt the config files from disk using the auth string.
@@ -302,11 +302,12 @@ impl ConfigGenApi {
 }
 
 /// Config gen params that are only used locally, shouldn't be shared
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigGenParamsLocal {
     /// Our peer id
     pub our_id: PeerId,
     /// Our TLS private key
+    #[serde(with = "serde_tls_key")]
     pub our_private_key: rustls::PrivateKey,
     /// Secret API auth string
     pub api_auth: ApiAuth,
@@ -707,6 +708,7 @@ mod tests {
 
             let api = FedimintServer {
                 data_dir: dir.clone(),
+                config_gen_params: None,
                 settings: settings.clone(),
                 db,
             };

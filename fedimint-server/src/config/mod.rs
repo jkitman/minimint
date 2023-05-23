@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::SocketAddr;
 use std::path::Path;
+use std::str::FromStr;
 use std::time::Duration;
 use std::{env, fs};
 
@@ -157,14 +158,22 @@ pub struct ServerConfigLocal {
     pub download_token_limit: Option<u64>,
 }
 
-#[derive(Debug, Clone)]
 /// All the parameters necessary for generating the `ServerConfig` during setup
 ///
 /// * Guardians can create the parameters using a setup UI or CLI tool
 /// * Used for distributed or trusted config generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigGenParams {
     pub local: ConfigGenParamsLocal,
     pub consensus: ConfigGenParamsConsensus,
+}
+
+impl FromStr for ConfigGenParams {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(s)
+    }
 }
 
 impl ServerConfigConsensus {
@@ -842,7 +851,7 @@ mod serde_tls_cert_map {
     }
 }
 
-mod serde_tls_key {
+pub mod serde_tls_key {
     use std::borrow::Cow;
 
     use bitcoin_hashes::hex::{FromHex, ToHex};
