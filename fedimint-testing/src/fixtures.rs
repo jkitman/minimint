@@ -28,6 +28,9 @@ use crate::ln::LightningTest;
 /// A default timeout for things happening in tests
 pub const TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How many blocks required for finality by default
+pub const FINALITY_DELAY: u64 = 10;
+
 /// Offset from the normal port by 30000 to avoid collisions
 static BASE_PORT: AtomicU16 = AtomicU16::new(38173);
 
@@ -110,6 +113,8 @@ impl Fixtures {
 
     /// Starts a new federation with default number of peers for testing
     pub async fn new_fed(&self) -> FederationTest {
+        // ensure enough blocks have been mined
+        self.bitcoin.mine_blocks(FINALITY_DELAY).await;
         self.new_fed_with_peers(self.num_peers).await
     }
 
